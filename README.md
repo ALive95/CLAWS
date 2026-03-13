@@ -93,9 +93,9 @@ The parameter $\alpha \geq \max|\partial_q F|$ is the numerical viscosity coeffi
 
 The inner solver in `claws_G.py` uses the **Godunov** finite volume scheme. With $W$ frozen, the physical flux at interface $i+\tfrac{1}{2}$ is obtained by solving the Riemann problem $(q_i^n, q_{i+1}^n)$ for the local flux $f(u) = F(t^n, x_{i+1/2}, W_{i+1/2}^n, u)$, where $W$ is interpolated to the interface. The Godunov flux is:
 
-$$\hat{F}_{i+1/2}^n = \min_{u \in [u_L, u_R]} f(u) \text{if } u_L \leq u_R \text{ (rarefaction)},$$
+$$\hat{F}_{i+1/2}^n = \min_{u \in [u_L, u_R]} f(u) \quad \text{if } u_L \leq u_R \text{ (rarefaction)},$$
 or
-$$\hat{F}_{i+1/2}^n = \max_{u \in [u_R, u_L]} f(u) \text{if } u_L > u_R \text{ (shock)}.$$
+$$\hat{F}_{i+1/2}^n = \max_{u \in [u_R, u_L]} f(u) \quad \text{if } u_L > u_R \text{ (shock)}.$$
 
 Two Riemann solver modes are implemented:
 
