@@ -118,23 +118,23 @@ The kernel matrix $G_{ij} = \gamma(x_i - x_j)$ is assembled once and reused. Cos
 
 **FFT convolution (periodic domains).** On a periodic domain the spatial convolution is a circular convolution, which the convolution theorem reduces to pointwise multiplication in frequency space:
 
-$$W = \mathcal{F}^{-1}\!\bigl(\hat{\gamma} \cdot \mathcal{F}(J(q))\bigr) \cdot \Delta x,$$
+$$W = \mathcal{F}^{-1}\bigl(\hat{\gamma} \cdot \mathcal{F}(J(q))\bigr) \cdot \Delta x,$$
 
 where $\hat{\gamma}$ is the DFT of the kernel sampled on the periodic grid and is precomputed once. Cost: $O(N_x \log N_x)$ per time level, compared to $O(N_x^2)$ for the dense approach. All experiments with periodic boundary conditions use this path.
 
 **Exponential kernel: recursive accumulator.** For the exponential temporal kernel $K(\tau) = \frac{1}{\tau_0} e^{-\tau/\tau_0}$, the temporal sum
 
-$$\tau_0\, W^n = \sum_{k=0}^{n-1} \Delta t\, e^{-(t_n - t_k)/\tau_0}\, C^k, \quad C^k = (\gamma * J(q^k))(x),$$
+$$\tau_0\, W^n = \sum_{k=0}^{n-1} \Delta t e^{-(t_n - t_k)/\tau_0} C^k, \quad C^k = (\gamma * J(q^k))(x),$$
 
 would normally require $O(N_t^2)$ evaluations across all time levels. The exponential kernel has a **Markov property** that replaces this full sum with a one-step recursion. Define the accumulator
 
-$$S^n = \sum_{k=0}^{n-1} \Delta t\, e^{-(n-1-k)\Delta t/\tau_0}\, C^k.$$
+$$S^n = \sum_{k=0}^{n-1} \Delta t e^{-(n-1-k)\Delta t/\tau_0} C^k.$$
 
 Then $\tau_0 W^n = e^{-\Delta t/\tau_0} S^n$, and the update rule
 
-$$S^{n+1} = e^{-\Delta t/\tau_0}\, S^n + \Delta t\, C^n$$
+$$S^{n+1} = e^{-\Delta t/\tau_0} S^n + \Delta t C^n$$
 
-advances $S$ at cost $O(N_x)$ per level, with no reference to past history. Combined with FFT spatial convolutions, the total per-iteration cost drops from $O(N_t^2 \cdot N_x^2)$ (naive, non-periodic) to $O(N_t \cdot N_x \log N_x)$ — linear in $N_t$ instead of quadratic. The historical contribution (from $t < 0$) is precomputed once as $S_{\text{hist}} = \sum_k \Delta t_k\, e^{-|t_k|/\tau_0}\, C_k^{\text{hist}}$ and used to initialize $S^0$; the recursion then handles its exponential decay automatically.
+advances $S$ at cost $O(N_x)$ per level, with no reference to past history. Combined with FFT spatial convolutions, the total per-iteration cost drops from $O(N_t^2 \cdot N_x^2)$ (naive, non-periodic) to $O(N_t \cdot N_x \log N_x)$ — linear in $N_t$ instead of quadratic. The historical contribution (from $t < 0$) is precomputed once as $S_{\text{hist}} = \sum_k \Delta t_k e^{-|t_k|/\tau_0} C_k^{\text{hist}}$ and used to initialize $S^0$; the recursion then handles its exponential decay automatically.
 
 This reduction is exact (no approximation is introduced) and applicable whenever the temporal kernel is exponential, regardless of whether spatial convolution uses the naive or FFT path. The `recursive_vs_naive.py` benchmark quantifies the speedup empirically.
 
