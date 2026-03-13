@@ -3,7 +3,8 @@
 Numerical companion to the paper:
 
 > **On the existence and uniqueness of nonlocal nonlinear conservation laws by means of fixed-point methods**
-> Alexander Keimer (University of Rostock), Hossein Nick Zinat Matin (École Polytechnique), Lorenzo Liverani (FAU Erlangen-Nürnberg)
+> 
+> by Alexander Keimer (University of Rostock), Hossein Nick Zinat Matin (École Polytechnique), Lorenzo Liverani (FAU Erlangen-Nürnberg)
 
 The primary goal of this codebase is to provide **numerical justification** for the theoretical results established in the paper: existence and uniqueness of solutions to 1D nonlocal scalar conservation laws with space-time (memory) nonlocality, proved via Picard fixed-point methods. The numerical solver mirrors the analytical fixed-point framework exactly, so that convergence of the iteration constitutes direct computational evidence for the contraction argument of the paper. 
 
@@ -34,15 +35,15 @@ where $F$ is the physical flux and $W$ is a **nonlocal term** that couples the s
 
 **Spatial nonlocality.** The nonlocal term depends only on the current time slice:
 
-$$W(t, x) = \int \gamma(x - y)\, J(q(t, y))\, dy,$$
+$$W(t, x) = \int \gamma(x - y) J(q(t, y)) dy,$$
 
 where $\gamma$ is a spatial kernel (compactly supported or integrable) and $J$ is a nonlinear function of the density. The integral is a spatial convolution, computed via FFT on periodic domains.
 
 **Space-time nonlocality (memory).** The nonlocal term integrates over the full past:
 
-$$W(t, x) = \int_{-\infty}^{t} \int \kappa(t-s,\, x-y)\, J(q(s, y))\, dy\, ds,$$
+$$W(t, x) = \int_{-\infty}^{t} \int \kappa(t-s, x-y) J(q(s, y)) dy ds,$$
 
-where $\kappa(\tau, z) = K(\tau)\,\gamma(z)$ is a factorized space-time kernel. The temporal kernel $K(\tau)$ encodes how much influence past states have at lag $\tau > 0$. Three temporal kernel families are implemented:
+where $\kappa(\tau, z) = K(\tau)\gamma(z)$ is a factorized space-time kernel. The temporal kernel $K(\tau)$ encodes how much influence past states have at lag $\tau > 0$. Three temporal kernel families are implemented:
 
 - **Exponential:** $K(\tau) = \frac{1}{\tau_0} e^{-\tau/\tau_0}$
 - **Erlang (order 2):** $K(\tau) = \frac{\tau}{\tau_0^2} e^{-\tau/\tau_0}$
@@ -104,7 +105,7 @@ Two Riemann solver modes are implemented:
 
 **Advantages.** Godunov is the least diffusive monotone scheme in its class — it adds no artificial viscosity beyond what is physically present. Shocks and discontinuities are captured sharply, with a profile that converges at rate $O(\Delta x)$ in $L^1$ even for non-smooth solutions, compared to Lax-Friedrichs which is formally only first-order but with a larger constant.
 
-**Disadvantages.** In `general` mode, the cost is $O(N_x)$ Riemann solves per time step, each requiring an iterative optimization; for large grids this is prohibitively slow. Even in `concave` mode, the scheme requires evaluating $F$ pointwise at interfaces (scalar arguments) rather than as a vectorized array over all cells, so it does not benefit from NumPy vectorization in the same way as Lax-Friedrichs. Additionally, **the analytical concave solver is only valid when the flux $q \mapsto F(t,x,w,q)$ is genuinely concave for all frozen $(t,x,w)$** — which holds for the LWR model $F = V_{\max}(t,x)\,q(1-q)\,v(w)$ but must be verified for other models.
+**Disadvantages.** In `general` mode, the cost is $O(N_x)$ Riemann solves per time step, each requiring an iterative optimization; for large grids this is prohibitively slow. Even in `concave` mode, the scheme requires evaluating $F$ pointwise at interfaces (scalar arguments) rather than as a vectorized array over all cells, so it does not benefit from NumPy vectorization in the same way as Lax-Friedrichs. Additionally, **the analytical concave solver is only valid when the flux $q \mapsto F(t,x,w,q)$ is genuinely concave for all frozen $(t,x,w)$** — which holds for the LWR model $F = V_{\max}(t,x)q(1-q)v(w)$ but must be verified for other models.
 
 ### Computation of Nonlocality
 
@@ -112,7 +113,7 @@ At each Picard iteration, the nonlocal field $W$ must be evaluated at all time l
 
 **Naive (non-periodic domains).** Without periodic boundary conditions, the spatial convolution is computed as a dense matrix-vector product:
 
-$$W_i = \Delta x \sum_j \gamma(x_i - x_j)\, J(q_j), \quad i = 1, \ldots, N_x.$$
+$$W_i = \Delta x \sum_j \gamma(x_i - x_j) J(q_j), \quad i = 1, \ldots, N_x.$$
 
 The kernel matrix $G_{ij} = \gamma(x_i - x_j)$ is assembled once and reused. Cost: $O(N_x^2)$ per time level. For the full memory case, the temporal sum adds an outer loop over past levels, giving $O(N_t^2 \cdot N_x^2)$ per iteration — feasible only at coarse resolution.
 
@@ -124,7 +125,7 @@ where $\hat{\gamma}$ is the DFT of the kernel sampled on the periodic grid and i
 
 **Exponential kernel: recursive accumulator.** For the exponential temporal kernel $K(\tau) = \frac{1}{\tau_0} e^{-\tau/\tau_0}$, the temporal sum
 
-$$\tau_0\, W^n = \sum_{k=0}^{n-1} \Delta t e^{-(t_n - t_k)/\tau_0} C^k, \quad C^k = (\gamma * J(q^k))(x),$$
+$$\tau_0 W^n = \sum_{k=0}^{n-1} \Delta t e^{-(t_n - t_k)/\tau_0} C^k, \quad C^k = (\gamma * J(q^k))(x),$$
 
 would normally require $O(N_t^2)$ evaluations across all time levels. The exponential kernel has a **Markov property** that replaces this full sum with a one-step recursion. Define the accumulator
 
@@ -199,7 +200,7 @@ When `SAVE_SOLUTIONS = True`, solutions are serialized to compressed `.npz` file
 
 Solves the LWR model
 
-$$\partial_t q + \partial_x \bigl(q(1-q)\,V_{\max}(1 - W)\bigr) = 0$$
+$$\partial_t q + \partial_x \bigl(q(1-q)V_{\max}(1 - W)\bigr) = 0$$
 
 with a smooth Gaussian initial condition on a large domain (outflow boundaries) in two configurations: (1) spatial-only nonlocality with a cosine-bump kernel $\gamma$ of radius $R = 0.5$, and (2) space-time nonlocality with an exponential temporal kernel ($\tau_0 = 0.3$) and a wider spatial kernel ($R = 2.5$). Snapshots, space-time density maps, and Picard convergence histories are produced for both.
 
@@ -219,7 +220,7 @@ with a smooth Gaussian initial condition on a large domain (outflow boundaries) 
 
 Uses the nonlocal LWR traffic model from Chiarello, Goatin, and Rossi (2018) as a validation benchmark and as a vehicle for studying how kernel parameters affect the solution. The model is
 
-$$\partial_t \rho + \partial_x \bigl(V_{\max}(t,x)\,\rho(1-\rho)\,v(W)\bigr) = 0,$$
+$$\partial_t \rho + \partial_x \bigl(V_{\max}(t,x)\rho(1-\rho)v(W)\bigr) = 0,$$
 
 with velocity function $v(w) = (1-w)^{m-1}(1+w)^m$ and the quintic spatial kernel
 
@@ -233,7 +234,7 @@ The setup is a circular road $x \in (-1, 1)$ with periodic boundaries, constant 
 
 For each parameter configuration the cost functionals
 
-$$J(T) = \int_0^T \mathrm{TV}_x(\rho(t, \cdot))\, dt, \qquad \Psi(T; a, b) = \int_0^T \int_a^b \phi(\rho)\, dx\, dt$$
+$$J(T) = \int_0^T \mathrm{TV}_x(\rho(t, \cdot)) dt, \qquad \Psi(T; a, b) = \int_0^T \int_a^b \phi(\rho) dx dt$$
 
 are computed, where $\phi(\rho)$ is a piecewise-linear queue indicator. Space-time density maps are saved for representative parameter values.
 
