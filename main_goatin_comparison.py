@@ -23,7 +23,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from solver.claws_LXF import (solve_nonlocal_space, solve_nonlocal_memory_factorized,
-                              solve_nonlocal_memory_exponential)
+                              solve_nonlocal_memory_exponential,
+                              solve_direct_lxf_memory_factorized,
+                              solve_direct_lxf_memory_exponential)
 from main_goatin import (make_kernel, make_v, make_flux, max_v,
                          _build_Vmax_profiles, X_RANGE, T_FINAL, RHO_0)
 
@@ -99,6 +101,81 @@ def solve_spatial(eta, delta, m, Vmax_profiles):
         alpha=alpha, cfl=CFL, tol=TOL, max_iter=MAX_ITER,
         bc='periodic', verbose=True
     )
+
+
+def solve_spatial_direct(eta, delta, m, Vmax_profiles):
+    """
+    Direct (explicit) LxF for the spatial-only case — no fixed-point loop.
+    At each step: W^n = kernel * q^n, then one LxF advance.
+    """
+    v_func   = make_v(m)
+    kernel   = make_kernel(eta, delta)
+    F_flux   = make_flux(Vmax_profiles, v_func)
+
+    max_Vmax = max(np.max(Vmax_profiles[0]), np.max(Vmax_profiles[1]))
+    alpha    = max_Vmax * max_v(m)
+
+    dx = (X_RANGE[1] - X_RANGE[0]) / NX
+    x  = np.linspace(X_RANGE[0] + dx / 2, X_RANGE[1] - dx / 2, NX)
+    dt = CFL * dx / alpha
+    Nt = max(1, int(np.ceil(T_FINAL / dt)))
+    dt = T_FINAL / Nt
+    t  = np.linspace(0, T_FINAL, Nt + 1)
+
+    k_idx  = np.arange(NX)
+    k_dist = np.where(k_idx <= NX // 2, k_idx * dx, (k_idx - NX) * dx)
+    kfft   = np.fft.fft(kernel(k_dist))
+
+    def conv(q):
+        return np.real(np.fft.ifft(np.fft.fft(q) * kfft)) * dx
+
+    lam   = dt / dx
+    q     = np.full(NX, RHO_0)
+    q_out = np.zeros((Nt + 1, NX))
+    q_out[0] = q.copy()
+
+    for n in range(Nt):
+        W_n   = conv(q)
+        flux  = F_flux(t[n], x, W_n, q)
+        q_r   = np.roll(q, -1)
+        fl_r  = np.roll(flux, -1)
+        F_hat = 0.5 * (flux + fl_r) - 0.5 * alpha * (q_r - q)
+        F_l   = np.roll(F_hat, 1)
+        q     = q - lam * (F_hat - F_l)
+        q_out[n + 1] = q.copy()
+
+    return x, t, q_out
+
+
+def solve_with_memory_direct(eta, delta, m, Vmax_profiles, K_time, label=""):
+    """Direct (explicit) LxF for the memory cases — no fixed-point loop."""
+    v_func  = make_v(m)
+    kernel  = make_kernel(eta, delta)
+    F_flux  = make_flux(Vmax_profiles, v_func)
+    J_id    = lambda q: q.copy()
+    q0_func = lambda x: np.full_like(x, RHO_0)
+    q0_hist = lambda t, x: np.full_like(x, RHO_0)
+
+    max_Vmax = max(np.max(Vmax_profiles[0]), np.max(Vmax_profiles[1]))
+    alpha    = max_Vmax * max_v(m)
+
+    if label:
+        print(f"  [direct {label}]")
+
+    common = dict(
+        x_range=X_RANGE, Nx=NX, T=T_FINAL,
+        T_hist=T_HIST, N_hist=N_HIST,
+        alpha=alpha, cfl=CFL, bc="periodic", verbose=True
+    )
+
+    if label == "exponential":
+        x, t, q, _ = solve_direct_lxf_memory_exponential(
+            F_flux, J_id, TAU0, kernel, q0_hist, q0_func, **common)
+    else:
+        x, t, q, _ = solve_direct_lxf_memory_factorized(
+            F_flux, J_id, K_time, kernel, q0_hist, q0_func, **common)
+
+    return x, t, q
 
 
 def solve_with_memory(eta, delta, m, Vmax_profiles, K_time, label=""):
@@ -212,6 +289,42 @@ def plot_snapshots_overlay(results, snap_times, case_label, filename):
     fig.suptitle(case_label, fontsize=13, y=1.02)
     fig.tight_layout()
     fig.savefig(filename, dpi=150, bbox_inches="tight")
+    print(f"Saved: {filename}")
+    plt.close(fig)
+
+
+def plot_fp_vs_direct(q_fp, q_dir, x, t, model_name, case_label, filename):
+    """
+    Three-panel comparison: FP solution (left), direct solution (center),
+    pointwise absolute error (right).
+    """
+    T_mesh, X_mesh = np.meshgrid(t, x, indexing="ij")
+    err = np.abs(q_fp - q_dir)
+
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+
+    pcm0 = axes[0].pcolormesh(X_mesh, T_mesh, q_fp,
+                               shading="auto", cmap="jet", vmin=0, vmax=1)
+    fig.colorbar(pcm0, ax=axes[0], label=r"$\rho$")
+    axes[0].set_xlabel("$x$"); axes[0].set_ylabel("$t$")
+    axes[0].set_title("Fixed-point solver")
+
+    pcm1 = axes[1].pcolormesh(X_mesh, T_mesh, q_dir,
+                               shading="auto", cmap="jet", vmin=0, vmax=1)
+    fig.colorbar(pcm1, ax=axes[1], label=r"$\rho$")
+    axes[1].set_xlabel("$x$"); axes[1].set_ylabel("$t$")
+    axes[1].set_title("Direct LxF")
+
+    pcm2 = axes[2].pcolormesh(X_mesh, T_mesh, err,
+                               shading="auto", cmap="Reds")
+    fig.colorbar(pcm2, ax=axes[2],
+                 label=r"$|\rho_{\mathrm{FP}} - \rho_{\mathrm{direct}}|$")
+    axes[2].set_xlabel("$x$"); axes[2].set_ylabel("$t$")
+    axes[2].set_title("Pointwise error")
+
+    fig.suptitle(f"{case_label} — {model_name}", fontsize=12)
+    fig.tight_layout()
+    fig.savefig(filename, dpi=150)
     print(f"Saved: {filename}")
     plt.close(fig)
 
@@ -339,6 +452,31 @@ if __name__ == "__main__":
 
         print(f"\n  Case {tag} total: {time.time() - t_case:.1f}s")
 
+        # --- Direct solver runs (no fixed-point) ---
+        all_direct = {}
+
+        cached_d = load_solution(tag, "direct_spatial (no memory)") if SAVE_SOLUTIONS else None
+        if cached_d is not None:
+            _, _, q_sd = cached_d
+        else:
+            print("\n--- Direct spatial (no memory) ---")
+            _, _, q_sd = solve_spatial_direct(eta, delta, m, Vmax_profiles)
+            if SAVE_SOLUTIONS:
+                save_solution(tag, "direct_spatial (no memory)", x_s, t_s, q_sd)
+        all_direct["spatial (no memory)"] = q_sd
+
+        for kname, K_func in KERNELS.items():
+            cached_d = load_solution(tag, f"direct_{kname}") if SAVE_SOLUTIONS else None
+            if cached_d is not None:
+                _, _, q_md = cached_d
+            else:
+                print(f"\n--- Direct memory: {kname} ---")
+                _, _, q_md = solve_with_memory_direct(
+                    eta, delta, m, Vmax_profiles, K_func, label=kname)
+                if SAVE_SOLUTIONS:
+                    save_solution(tag, f"direct_{kname}", x_s, t_s, q_md)
+            all_direct[kname] = q_md
+
         # --- Plots ---
         results_mem = {k: v for k, v in all_results.items()
                        if k != "spatial (no memory)"}
@@ -354,6 +492,18 @@ if __name__ == "__main__":
         plot_l1_difference(
             results_mem, x_s, t_s, q_s, case_label,
             filename=f"l1diff_case{tag}.png")
+
+        # --- FP vs direct comparison plots (one per model) ---
+        os.makedirs(f"figures/Comparison_Goatin_Memory/fp_vs_direct", exist_ok=True)
+        for mname in model_names:
+            q_fp  = all_results[mname][2]
+            q_dir = all_direct[mname]
+            plot_fp_vs_direct(
+                q_fp, q_dir, x_s, t_s,
+                model_name=mname,
+                case_label=case_label,
+                filename=(f"figures/Comparison_Goatin_Memory/fp_vs_direct/"
+                          f"case{tag}_{mname.replace(' ', '_')}.png"))
 
     print(f"\nTotal time: {time.time() - t_start_total:.1f}s")
     print("All comparison plots saved.")

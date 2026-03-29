@@ -199,6 +199,61 @@ def run_single(eta, delta, m, Vmax_profiles, verbose=False):
     return x, t, q, info
 
 
+def run_single_direct(eta, delta, m, Vmax_profiles, verbose=False):
+    """
+    Direct (explicit) LxF march for the Goatin problem — no fixed-point loop.
+
+    At each time step n:
+      1. Compute W^n = kernel * q^n  (current-step density, no iteration).
+      2. Advance q^n -> q^{n+1} with one periodic LxF step.
+    """
+    v_func   = make_v(m)
+    kernel   = make_kernel(eta, delta)
+    F_flux   = make_flux(Vmax_profiles, v_func)
+
+    max_Vmax = max(np.max(Vmax_profiles[0]), np.max(Vmax_profiles[1]))
+    alpha    = max_Vmax * max_v(m)
+
+    # --- Grid ---
+    dx = (X_RANGE[1] - X_RANGE[0]) / NX
+    x  = np.linspace(X_RANGE[0] + dx / 2, X_RANGE[1] - dx / 2, NX)
+    dt = CFL * dx / alpha
+    Nt = max(1, int(np.ceil(T_FINAL / dt)))
+    dt = T_FINAL / Nt
+    t  = np.linspace(0, T_FINAL, Nt + 1)
+
+    if verbose:
+        print(f"Direct LxF: Nx={NX}, Nt={Nt}, dx={dx:.4e}, dt={dt:.4e}")
+
+    # FFT-based periodic spatial convolution
+    k_idx  = np.arange(NX)
+    k_dist = np.where(k_idx <= NX // 2, k_idx * dx, (k_idx - NX) * dx)
+    kfft   = np.fft.fft(kernel(k_dist))
+
+    def conv(q):
+        return np.real(np.fft.ifft(np.fft.fft(q) * kfft)) * dx
+
+    lam   = dt / dx
+    q     = np.full(NX, RHO_0)
+    q_out = np.zeros((Nt + 1, NX))
+    q_out[0] = q.copy()
+
+    for n in range(Nt):
+        W_n  = conv(q)                          # W^n from current density
+        flux = F_flux(t[n], x, W_n, q)
+
+        # Periodic LxF step
+        q_r   = np.roll(q, -1)
+        fl_r  = np.roll(flux, -1)
+        F_hat = 0.5 * (flux + fl_r) - 0.5 * alpha * (q_r - q)
+        F_l   = np.roll(F_hat, 1)
+        q     = q - lam * (F_hat - F_l)
+
+        q_out[n + 1] = q.copy()
+
+    return x, t, q_out
+
+
 # ================================================================
 # Parameter sweeps
 # ================================================================
@@ -341,3 +396,63 @@ if __name__ == "__main__":
     print()
     print(f"Total time: {time.time() - t_start_total:.1f}s")
     print("All plots saved.")
+
+    # ================================================================
+    # FP vs direct comparison (eta=0.5, delta=0, m=3)
+    # ================================================================
+    ETA_CMP, DELTA_CMP, M_CMP = 0.5, 0.0, 3
+
+    print()
+    print("=" * 60)
+    print(f"FP vs Direct comparison: eta={ETA_CMP}, delta={DELTA_CMP}, m={M_CMP}")
+    print("=" * 60)
+
+    x_fp, t_fp, q_fp, _ = run_single(ETA_CMP, DELTA_CMP, M_CMP,
+                                      Vmax_profiles, verbose=True)
+    x_dir, t_dir, q_dir = run_single_direct(ETA_CMP, DELTA_CMP, M_CMP,
+                                            Vmax_profiles, verbose=True)
+
+    # Interpolate direct solution onto FP time grid if grids differ
+    # (they use the same alpha/CFL so grids should match; assert for safety)
+    assert q_fp.shape == q_dir.shape, \
+        f"Grid mismatch: FP {q_fp.shape} vs direct {q_dir.shape}"
+
+    err = np.abs(q_fp - q_dir)   # pointwise absolute error
+
+    fig_cmp, axes_cmp = plt.subplots(1, 3, figsize=(15, 4))
+
+    T_mesh, X_mesh = np.meshgrid(t_fp, x_fp, indexing="ij")
+    vmin, vmax_ = 0.0, 1.0
+
+    # --- Left: fixed-point solution ---
+    pcm0 = axes_cmp[0].pcolormesh(X_mesh, T_mesh, q_fp,
+                                   shading="auto", cmap="jet",
+                                   vmin=vmin, vmax=vmax_)
+    fig_cmp.colorbar(pcm0, ax=axes_cmp[0], label=r"$\rho$")
+    axes_cmp[0].set_xlabel("$x$")
+    axes_cmp[0].set_ylabel("$t$")
+    axes_cmp[0].set_title("Fixed-point solver")
+
+    # --- Center: direct LxF solution ---
+    pcm1 = axes_cmp[1].pcolormesh(X_mesh, T_mesh, q_dir,
+                                   shading="auto", cmap="jet",
+                                   vmin=vmin, vmax=vmax_)
+    fig_cmp.colorbar(pcm1, ax=axes_cmp[1], label=r"$\rho$")
+    axes_cmp[1].set_xlabel("$x$")
+    axes_cmp[1].set_ylabel("$t$")
+    axes_cmp[1].set_title("Direct LxF")
+
+    # --- Right: pointwise error ---
+    pcm2 = axes_cmp[2].pcolormesh(X_mesh, T_mesh, err,
+                                   shading="auto", cmap="Reds")
+    fig_cmp.colorbar(pcm2, ax=axes_cmp[2], label=r"$|\rho_{\mathrm{FP}} - \rho_{\mathrm{direct}}|$")
+    axes_cmp[2].set_xlabel("$x$")
+    axes_cmp[2].set_ylabel("$t$")
+    axes_cmp[2].set_title("Pointwise error")
+
+    fig_cmp.suptitle(
+        rf"Chiarello--Goatin: $\eta={ETA_CMP}$, $\delta={DELTA_CMP}$, $m={M_CMP}$",
+        fontsize=12)
+    fig_cmp.tight_layout()
+    fig_cmp.savefig("figures/Goatin/fp_vs_direct.png", dpi=150)
+    print("Saved: figures/Goatin/fp_vs_direct.png")

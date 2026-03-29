@@ -139,76 +139,70 @@ def K_triangular(tau):
 # ================================================================
 # Figure: model components
 # ================================================================
-# Layout: 2x2
-#   [top-left]     memory kernels K(tau)
-#   [top-right]    spatial kernel gamma(z)
-#   [bottom-left]  historical datum q0_hist(t, x) for several t <= 0
-#   [bottom-right] Vmax(t, x) as a space-time heatmap
+# Layout: 1x3
+#   [left]   memory kernels K(tau)
+#   [center] spatial kernel gamma(z)
+#   [right]  historical datum q0_hist(t, x) as 3D surface, t=0 in red
 
 dx_plot = L / NX
 x_plot  = np.linspace(X_RANGE[0] + dx_plot / 2, X_RANGE[1] - dx_plot / 2, NX)
 
-fig0, axes0 = plt.subplots(2, 2, figsize=(12, 8))
+fig0 = plt.figure(figsize=(16, 5))
+ax0  = fig0.add_subplot(1, 3, 1)           # memory kernels
+ax1  = fig0.add_subplot(1, 3, 2)           # spatial kernel
+ax2  = fig0.add_subplot(1, 3, 3, projection="3d")  # historical datum (3D)
 
-# --- Top-left: memory kernels ---
-ax = axes0[0, 0]
-tau_max = 3.5 * TAU0
-tau_arr = np.linspace(0, tau_max, 500)
-K_vec   = np.vectorize  # shorthand
+# --- Left: memory kernels ---
+tau_arr = np.linspace(0, 3.5 * TAU0, 500)
+ax0.plot(tau_arr, [K_exponential(t) for t in tau_arr],
+         color="tomato",      lw=2.0, label="Exponential")
+ax0.plot(tau_arr, [K_erlang(t)      for t in tau_arr],
+         color="forestgreen", lw=2.0, label="Erlang",     ls="--")
+ax0.plot(tau_arr, [K_triangular(t)  for t in tau_arr],
+         color="darkorange",  lw=2.0, label="Triangular", ls="-.")
+ax0.axvline(TAU0, color="gray", lw=0.8, ls=":", label=r"$\tau_0$")
+ax0.set_xlabel(r"$\tau$")
+ax0.set_ylabel(r"$K(\tau)$")
+ax0.set_title("Memory kernels")
+ax0.legend(fontsize=9)
+ax0.grid(True, alpha=0.3)
 
-ax.plot(tau_arr, [K_exponential(t) for t in tau_arr],
-        color="tomato",      lw=2.0, label="Exponential")
-ax.plot(tau_arr, [K_erlang(t)      for t in tau_arr],
-        color="forestgreen", lw=2.0, label="Erlang",      ls="--")
-ax.plot(tau_arr, [K_triangular(t)  for t in tau_arr],
-        color="darkorange",  lw=2.0, label="Triangular",  ls="-.")
-ax.axvline(TAU0, color="gray", lw=0.8, ls=":", label=r"$\tau_0$")
-ax.set_xlabel(r"$\tau$")
-ax.set_ylabel(r"$K(\tau)$")
-ax.set_title("Memory kernels")
-ax.legend(fontsize=9)
-ax.grid(True, alpha=0.3)
-
-# --- Top-right: spatial kernel gamma(z) ---
-ax = axes0[0, 1]
+# --- Center: spatial kernel gamma(z) ---
 z_arr = np.linspace(-1.5 * R, 0.5 * R, 500)
-ax.plot(z_arr, gamma(z_arr), color="steelblue", lw=2.0)
-ax.axvline(-R, color="gray", lw=0.8, ls=":", label="$-R$")
-ax.axvline( 0, color="gray", lw=0.8, ls="--", label="$0$")
-ax.fill_between(z_arr, gamma(z_arr), alpha=0.15, color="steelblue")
-ax.set_xlabel("$z$")
-ax.set_ylabel(r"$\gamma(z)$")
-ax.set_title("Spatial kernel $\\gamma$")
-ax.legend(fontsize=9)
-ax.grid(True, alpha=0.3)
+ax1.plot(z_arr, gamma(z_arr), color="steelblue", lw=2.0)
+ax1.axvline(-R, color="gray", lw=0.8, ls=":", label="$-R$")
+ax1.axvline( 0, color="gray", lw=0.8, ls="--", label="$0$")
+ax1.fill_between(z_arr, gamma(z_arr), alpha=0.15, color="steelblue")
+ax1.set_xlabel("$z$")
+ax1.set_ylabel(r"$\gamma(z)$")
+ax1.set_title("Spatial kernel $\\gamma$")
+ax1.legend(fontsize=9)
+ax1.grid(True, alpha=0.3)
 
-# --- Bottom-left: historical datum q0_hist(t, x) ---
-ax   = axes0[1, 0]
-hist_times = [0.0, -0.5, -1.0, -2.0, -4.0]
-cols = plt.cm.Blues_r(np.linspace(0.1, 0.7, len(hist_times)))
-for tc, col in zip(hist_times, cols):
-    ax.plot(x_plot, q0_hist(tc, x_plot), color=col, lw=1.8,
-            label=f"$t = {tc:.1f}$")
-ax.set_xlabel("$x$")
-ax.set_ylabel(r"$q_0(t, x)$")
-ax.set_title("Historical datum $q_0(t,x)$, $t \\leq 0$")
-ax.legend(fontsize=9)
-ax.grid(True, alpha=0.3)
+# --- Right: historical datum as 3D surface ---
+# Use a coarser grid for the surface to keep rendering fast
+x_3d   = np.linspace(X_RANGE[0], X_RANGE[1], 400)
+t_3d   = np.linspace(-T_HIST, 0.0, 200)
+X3, T3 = np.meshgrid(x_3d, t_3d)           # shape (100, 200)
+Q3     = q0_hist(T3, X3)
 
-# --- Bottom-right: Vmax(t, x) heatmap ---
-ax     = axes0[1, 1]
-t_plot = np.linspace(0, T, 200)
-Vmat   = np.array([[V_max(ti, xi) for xi in x_plot] for ti in t_plot])
-T_mesh, X_mesh = np.meshgrid(t_plot, x_plot, indexing="ij")
-pcm = ax.pcolormesh(X_mesh, T_mesh, Vmat, shading="auto", cmap="RdYlGn")
-fig0.colorbar(pcm, ax=ax, label=r"$V_{\max}(t,x)$")
-ax.set_xlabel("$x$")
-ax.set_ylabel("$t$")
-ax.set_title(r"Speed limit $V_{\max}(t,x)$")
+ax2.plot_surface(X3, T3, Q3, cmap="Blues", alpha=1.0,
+                 linewidth=0, antialiased=True)
+
+# Highlight t=0 profile in red
+ax2.plot(x_3d, np.zeros_like(x_3d), q0_func(x_3d),
+         color="red", lw=2.5, zorder=5, label="$t=0$")
+
+ax2.set_xlabel("$x$", labelpad=6)
+ax2.set_ylabel("$t$", labelpad=6)
+ax2.set_zlabel(r"$q_{\mathrm{hist}}$", labelpad=6)
+ax2.set_title("Historical datum $q_{\\mathrm{hist}}(t,x)$, $t \\leq 0$")
+ax2.legend(fontsize=9)
+ax2.view_init(elev=25, azim=60)
 
 fig0.suptitle("Model components", fontsize=13)
 fig0.tight_layout()
-fig0.savefig("figures/basic/model_components.png", dpi=150)
+fig0.savefig("figures/basic/model_components.png", dpi=300)
 print("Saved: figures/basic/model_components.png")
 print()
 
